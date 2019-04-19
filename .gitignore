@@ -1,0 +1,14 @@
+cnn/data/
+
+.DS_Store
+secret
+
+# Settings
+setting*.json
+
+*.pyc*
+*__pycache__*
+.idea*
+*.idea
+
+*.ipynb_checkpoints*
