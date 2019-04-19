@@ -257,46 +257,6 @@ def draw_bbox(bbox, preds_probs, img, name='test', save_img=True):
     return img_copy
 
 
-def nonMaxSupression(box, thresh):  # Malisiewicz et al.
-    #,digits, probability
-    supressedBoxInds = []
-    x1 = box[:,0]
-    y1 = box[:,1]
-    x2 = box[:,2]
-    y2 = box[:,3]
-
-    # compute the area of the bounding boxes and sort the bounding
-    # boxes by the bottom-right y-coordinate of the bounding box
-    boxArea = (box[:,2]-box[:,0] + 1) * \
-              (box[:,3]-box[:,1] + 1)
-    idxs = np.argsort(y2)
-
-    while len(idxs) > 0:
-        last = len(idxs) - 1
-        i = idxs[last]
-        supressedBoxInds.append(i)
-
-        # find the largest (x, y) coordinates for the start of
-        # the bounding box and the smallest (x, y) coordinates
-        # for the end of the bounding box
-        xx1 = np.maximum(x1[i], x1[idxs[:last]])
-        yy1 = np.maximum(y1[i], y1[idxs[:last]])
-        xx2 = np.minimum(x2[i], x2[idxs[:last]])
-        yy2 = np.minimum(y2[i], y2[idxs[:last]])
-
-        width  = np.maximum(0, xx2 - xx1 + 1)
-        height = np.maximum(0, yy2 - yy1 + 1)
-        overlap = (width * height) / boxArea[idxs[:last]]
-
-        overlappedInds = np.where(overlap > thresh)[0]
-        toBeRemoved = np.concatenate(([last], overlappedInds))
-        idxs = np.delete(idxs, toBeRemoved)
-        # supressedBoxes = box[supressInd].astype("int")
-    return supressedBoxInds
-
-
-
-
 def loadAndDetectImages():
     for i in range(1,7,1):
         imName = str(np.uint8(i))
@@ -308,7 +268,7 @@ def loadAndDetectImages():
 def createCNNVideo():
     num = 1
     fourcc = cv2.VideoWriter_fourcc('M','J','P','G')
-    CNNmodel = loadModel()
+    CNNmodel = load_trained_model()
 
     cap = cv2.VideoCapture('input/video.mp4')
     outCap = cv2.VideoWriter('output/videoCNN.avi', fourcc, 10, (540, 960), True)
