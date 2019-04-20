@@ -5,6 +5,7 @@ from utils.preprocess_utils import normalize_and_scale
 import pickle
 from tqdm import tqdm
 
+
 def create_contour_msk(img, threshold=0.2):
     if len(img.shape) == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -19,7 +20,11 @@ def create_contour_msk(img, threshold=0.2):
     smoothed = np.uint8(edges.copy())
     smoothed = cv2.morphologyEx(smoothed, cv2.MORPH_CLOSE, np.ones((3, 3)))
     smoothed = cv2.morphologyEx(smoothed, cv2.MORPH_OPEN, np.ones((5, 5)))
-    contours, _ = cv2.findContours(smoothed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contour_result = cv2.findContours(smoothed, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contour_result) == 3:
+        _,  contours, _ = contour_result
+    else:
+        contours, _ = contour_result
     contours = np.asarray(contours)
 
     area = np.array([cv2.contourArea(contour) for contour in contours])
@@ -57,9 +62,11 @@ def substract_img_mean(img, channel):
     return img
 
 
-def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_img=True, trained_model=None):
+def detect_bbox(img, steps=2, pyramid_scale_step=0.5, minimal_pic_factor=10, img_name=None, channel=3, save_img=True, trained_model=None):
     # steps = 2
-    #cropped_size = 32
+    img_height, img_width = img.shape[:2]
+    cropped_size = int(min([img_height, img_width]) / minimal_pic_factor)
+    print('cropped_size', cropped_size)
     SIZE = 64
     msks = create_contour_msk(img)
 
@@ -85,10 +92,10 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
 
     for i in range(0, 10, 1):
         # stop when scaled height is too small
-        if (scaled_height < half_size) | (scaled_width < half_size):
+        if (scaled_height <  half_size) | (scaled_width < half_size):
             break
-        scaled_height = np.int(np.round(scaled_height * 0.8))
-        scaled_width = np.int(np.round(scaled_width * 0.8))
+        scaled_height = np.int(np.round(scaled_height * pyramid_scale_step))
+        scaled_width = np.int(np.round(scaled_width * pyramid_scale_step))
         new_img = cv2.resize(scaled_images[i], (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
         new_msk = cv2.resize(scaled_masks[i], (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
         scaled_images.append(new_img)
@@ -103,6 +110,7 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
     pyramid_nums = len(scaled_images)
 
     for pyramid_level in tqdm(range(pyramid_nums)):
+        print('*'*50)
         print('pyramid_level: ', pyramid_level)
         current_msk = scaled_masks[pyramid_level]
         current_img = scaled_images[pyramid_level]
@@ -114,7 +122,8 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
         if pyramid_level > 3:
             steps = max(int(0.5*steps), 1)
             points_threshold = 150
-
+        if pyramid_level > 5:
+            break
         for i in range(0, current_h - cropped_size, steps):
             top = np.max([0, i - half_size])
             bottom = np.min([current_h, i + half_size])
@@ -124,15 +133,12 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
             for j in range(0, current_w - cropped_size, steps):
                 left = np.max([0, j - half_size])
                 right = np.min([current_w, j + half_size])
-
-                if (bottom - top < cropped_size) | (right - left < cropped_size):
+                if (bottom - top < cropped_size - 1) | (right - left < cropped_size - 1):
                     continue
-
                 cropped_msk = current_msk[top:bottom, left: right]
                 non_zero_pixels_count = np.count_nonzero(cropped_msk)
                 if non_zero_pixels_count < points_threshold:
                     continue
-
                 cropped_img = current_img[top:bottom, left:right, :].astype('float64')
                 cropped_img = normalize_and_scale(cropped_img.astype(float))
                 reshaped_cropped_img = cv2.resize(cropped_img, (SIZE, SIZE)).reshape(1, SIZE, SIZE, channel)
@@ -159,10 +165,9 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
                                          original_height_positions[bottom]], dtype='int16')
                         bbox_locs.append(bbox)
                         digits_probs_recorder.append(probs)
-
     bboxes = np.asarray(bbox_locs)
     bboxes_probs = np.asarray(digits_probs_recorder).squeeze()
-
+    print('len bbox', len(bboxes))
     potential_msks = np.zeros((img_height, img_width), dtype='float64')
     print('start to find bbox.')
     for idx in range(0, len(bboxes), 1):
@@ -177,7 +182,11 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
         np.uint8(digits_highli_concentrated_areas), cv2.MORPH_CLOSE, np.ones((3, 3)),
         iterations=2
     )
-    contours, _ = cv2.findContours(np.uint8(digits_highli_concentrated_areas), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contour_result =  cv2.findContours(np.uint8(digits_highli_concentrated_areas), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contour_result) == 3:
+        _,  contours, _ = contour_result
+    else:
+        contours, _ = contour_result
     # get bbox from contours
     bbox = []
     for cnt in contours:
@@ -191,7 +200,11 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
         b = bbox[idx]
         current_box = msks[b[1]:b[3], b[0]:b[2]]
         current_box = cv2.morphologyEx(current_box, cv2.MORPH_CLOSE, np.ones((5, 5)), iterations=5)
-        bwcontours, tree = cv2.findContours(np.uint8(current_box), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contour_result = cv2.findContours(np.uint8(current_box), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contour_result) == 3:
+            _, bwcontours, tree = contour_result
+        else:
+            bwcontours, tree = contour_result
         tmpbox = []
         for cnt in bwcontours:
             cB = cv2.boundingRect(cnt)
@@ -216,53 +229,46 @@ def detect_bbox(img, cropped_size=32, steps=2, img_name=None, channel=3, save_im
 
 
 def draw_bbox(bbox, preds_probs, img, name='test', save_img=True):
-
     img_copy = np.copy(img)
-    font = cv2.FONT_HERSHEY_SIMPLEX
 
     for ix in range(0, len(bbox), 1):
-        nDig = np.argmax(preds_probs[ix][0])
-        if nDig == 0:
-           continue # not a sequence
+        n_digit = np.argmax(preds_probs[ix][0])
+        if n_digit == 0:
+            continue  # not a sequence
 
-        nDigProb = np.max(preds_probs[ix][0])
+        n_digit_prob = np.max(preds_probs[ix][0])
         tmp = np.asarray(preds_probs[ix][1:5]).squeeze()
         seq = np.argmax(tmp, axis=1)
-        seqProb = np.max(tmp, axis=1)
-        confidence = (np.sum(seqProb) + nDigProb)/5.
-
-        if (nDigProb < 0.8): #| (confidence < 0.8):
-           continue
-
+        seq_prob = np.max(tmp, axis=1)
+        avg_prob = (np.sum(seq_prob) + n_digit_prob) / 5.
+        if (n_digit_prob < 0.8):
+            continue
         b = bbox[ix]
-        cv2.rectangle(img_copy, (b[0], b[1]), (b[2], b[3]), (0,255,255), 2)
-        sequence = seq[seq!=10]
-
+        cv2.rectangle(img_copy, (b[0], b[1]), (b[2], b[3]), (0, 255, 255), 2)
+        sequence = seq[seq != 10]
         text1 = str(sequence)
         print(text1)
-        conf = confidence*100
+        conf = avg_prob * 100
         print(conf)
-        text2 = 'confidence:' + str(('%2.3f'%conf)) + '%'
+        text2 = 'pred_prob:' + str(('%2.3f' % conf)) + '%'
         org1 = (b[0], b[1] - 5)
         org2 = (b[0], b[3] + 5)
-
-        cv2.putText(img_copy, text1, org1, font,fontScale = 0.5, color =  (0, 255, 0),lineType = 3,thickness=1)
-        cv2.putText(img_copy, text2, org2, font, fontScale =0.5, color=(255, 255, 255),lineType =2,thickness=1)
-
-    # cv2.imwrite('graded_images/' + name + '.png', oIm)
-
+        w, d = img.shape[:2]
+        font_size = int((w + d) / 20) / 20
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(img_copy, text1, org1, font, fontScale=font_size, color=(0, 255, 0), lineType=3, thickness=1)
+        cv2.putText(img_copy, text2, org2, font, fontScale=font_size, color=(255, 255, 255), lineType=2, thickness=1)
     if save_img == True:
-       cv2.imwrite('output/' + name + '.png', img_copy)
-
+        cv2.imwrite('output/' + name + '.png', img_copy)
     return img_copy
 
 
-def loadAndDetectImages():
-    for i in range(1,7,1):
+def read_and_detect_imgs():
+    for i in range(1, 7, 1):
         imName = str(np.uint8(i))
-        Img = cv2.imread('required/'+ imName + '.jpg',1)
+        Img = cv2.imread('required/' + imName + '.jpg', 1)
         # runCNNDetection(Img, imgName = imName)
-        detect_bbox(Img, img_name=imName, channel=3, trained_model= None)
+        detect_bbox(Img, img_name=imName, channel=3, trained_model=None)
 
 
 def createCNNVideo():
