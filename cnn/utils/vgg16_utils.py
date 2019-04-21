@@ -8,6 +8,7 @@ from utils.preprocess_utils import *
 
 def run_pretrained_vgg16():
     SHAPE = (64, 64)
+    SHAPE = (64, 64)
     CHANNEL = 3
     # 0 - 9 plus 10 as input to keras
     # Generate Data

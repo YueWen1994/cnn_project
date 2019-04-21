@@ -2,6 +2,7 @@ import cv2
 import pickle
 import h5py
 import numpy as np
+import pandas as pd
 import os
 from sklearn.model_selection import train_test_split
 
@@ -53,10 +54,61 @@ def normalize_and_scale(image_in, scale_range=(0, 1)):
         numpy.array: output image.
     """
     image_out = np.zeros(image_in.shape)
-    cv2.normalize(image_in, image_out, alpha=scale_range[0],
+    cv2.normalize(image_in.astype(float), image_out, alpha=scale_range[0],
                   beta=scale_range[1], norm_type=cv2.NORM_MINMAX)
 
     return image_out
+
+
+def get_normalized_bbox_info(train_bboxes, train_img_size):
+    bboxes_df = pd.DataFrame(train_bboxes)
+    normalized_bbox_df = bboxes_df.copy()
+    normalized_bbox_df['top'] = normalized_bbox_df.apply(
+        lambda x: max(
+            int(x['top'] * (train_img_size[0] / x['height'])), 0)
+        , 1)
+    normalized_bbox_df['left'] = normalized_bbox_df.apply(
+        lambda x: max(
+            int(x['left'] * (train_img_size[1] / x['width'])), 0)
+        , 1)
+
+    normalized_bbox_df['bottom'] = normalized_bbox_df.apply(
+        lambda x: min(
+            int(x['bottom'] * (train_img_size[0] / x['height'])), train_img_size[0] - 1)
+        , 1)
+
+    normalized_bbox_df['right'] = normalized_bbox_df.apply(
+        lambda x: min(
+            int(x['right'] * (train_img_size[1] / x['width'])), train_img_size[1] - 1)
+        , 1)
+
+    normalized_bbox_df['width'] = normalized_bbox_df['right'] - normalized_bbox_df['left']
+    normalized_bbox_df['height'] = normalized_bbox_df['bottom'] - normalized_bbox_df['top']
+    return normalized_bbox_df
+
+
+def get_detecting_imgages_labels(train_formatter, train_img_size):
+    train_orig_imgs = train_formatter.orig_imgs.copy()
+    train_bboxes = train_formatter.bboxes.copy()
+    normalized_bbox = get_normalized_bbox_info(train_bboxes, train_img_size)
+    train_labels = np.array(normalized_bbox[['top', 'left', 'width', 'height']])
+    train_images = np.array([normalize_img(img, train_img_size) for img in train_orig_imgs])
+    return train_images, train_labels
+
+
+def normalize_img(img, train_img_size):
+    if len(img.shape) == 3:
+        normalized_imgs = (cv2
+            .normalize(
+            cv2.cvtColor(
+                cv2.resize(img, train_img_size), cv2.COLOR_BGR2GRAY).astype(np.float64),
+            0, 1, cv2.NORM_MINMAX)[..., np.newaxis])
+    else:
+        normalized_imgs = (cv2
+            .normalize(
+                cv2.resize(img, train_img_size).astype(np.float64),
+            0, 1, cv2.NORM_MINMAX)[..., np.newaxis])
+    return normalized_imgs
 
 
 class DataGenerator:
@@ -132,7 +184,8 @@ class DataFormatter:
         self.output_data = []
         self.labels = []
         NEG_LABEL = self.neg_label
-
+        self.orig_imgs = []
+        self.bboxes = []
         for i in range(self.data_length):
 
             filename_path = os.path.join(self.folder, self.data[i]['filename'])
@@ -144,6 +197,7 @@ class DataFormatter:
                 img_org = cv2.imread(filename_path)
 
             img = img_org.copy()
+
 
             img_height, img_width = img.shape[:2]
 
@@ -170,6 +224,8 @@ class DataFormatter:
 
             # crop and resize image
             bbox = get_digit_region_box_helper(img, left_positions, top_positions, height_list, width_list)
+            self.orig_imgs.append(img)
+            self.bboxes.append(bbox)
             cropped_img = crop_img(img, bbox)
             region = cv2.resize(cropped_img, self.shape)
             region = normalize_and_scale(region.astype(float), scale_range=(0, 1))
@@ -180,29 +236,29 @@ class DataFormatter:
                 if bbox['top'] > 10 and bbox['left'] > 10:
                     negative_img = cv2.resize(img_org[0: bbox['top'], 0: bbox['left']], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
                     negative_img = cv2.resize(img_org[bbox['top']: bbox['bottom'], 0: bbox['left']], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
                     negative_img = cv2.resize(img_org[0: bbox['top'], bbox['left']: bbox['right']], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
                 # Add negative examples
                 if img_height - bbox['bottom'] > 10 and img_width - bbox['right'] > 10:
                     negative_img = cv2.resize(img_org[bbox['bottom']:,  bbox['right']:], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
                     negative_img = cv2.resize(img_org[bbox['bottom']:,  bbox['left']:bbox['right']], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
                     negative_img = cv2.resize(img_org[bbox['top']: bbox['bottom'],  bbox['right']:], self.shape)
                     self.labels.append(NEG_LABEL)
-                    self.output_data.append(negative_img)
+                    self.output_data.append(normalize_and_scale(negative_img.astype(float), scale_range=(0, 1)))
 
         self.output_data = np.array(self.output_data)
         self.labels = np.array(self.labels)
@@ -227,7 +283,10 @@ def get_digit_region_box_helper(img, left_positions, top_positions, height_list,
     return {'top': max(int(region_top), 0),
             'bottom': int(region_bottom),
             'left': max(int(region_left), 0),
-            'right': int(region_right),}
+            'right': int(region_right),
+            'height': height,
+            'width': width,
+            }
 
 
 def crop_img(img, bbox):
