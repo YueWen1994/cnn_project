@@ -328,8 +328,8 @@ def draw_bbox(bbox, preds_probs, img, name='test', save_img=True):
         org1 = (b[0], b[1] - 5)
         org2 = (b[0], b[3] + 5)
 
-        cv2.putText(img_copy, text1, org1, font,fontScale = 0.5, color =  (0, 255, 0),lineType = 3,thickness=1)
-        cv2.putText(img_copy, text2, org2, font, fontScale =0.5, color=(255, 255, 255),lineType =2,thickness=1)
+        cv2.putText(img_copy, text1, org1, font,fontScale = 5, color =  (0, 255, 0),lineType = 3,thickness=3)
+        cv2.putText(img_copy, text2, org2, font, fontScale = 5, color=(255, 255, 255),lineType =2,thickness=3)
 
     # cv2.imwrite('graded_images/' + name + '.png', oIm)
 
