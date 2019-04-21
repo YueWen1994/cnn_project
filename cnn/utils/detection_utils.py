@@ -62,16 +62,16 @@ def detect_img_bbox(img, model):
     return org_size_bbox
 
 
-def detect_and_draw(img, detection_model, classification_model, fontScale=0.35, name='test', thickness=3, save_img=True):
+def detect_and_draw(img, detection_model, classification_model, fontScale=0.35, name='test', thickness=3, save_img=True, output_folder='output/'):
     bbox = detect_img_bbox(img, detection_model)
     cropped_img = crop_img(img, bbox)
     normalized_img = normalize_and_scale(cropped_img.astype(float))
     predict_y = classification_model.predict(cv2.resize(normalized_img, (SIZE, SIZE)).reshape(1, SIZE, SIZE, channel))
-    bbox_result = draw_bbox(bbox, predict_y, img, fontScale=fontScale, name=name, save_img=save_img, thickness=thickness)
+    bbox_result = draw_bbox(bbox, predict_y, img, fontScale=fontScale, name=name, save_img=save_img, thickness=thickness, output_folder=output_folder)
     return bbox_result
 
 
-def draw_bbox(bbox, preds_probs, img, name='test', fontScale=0.35, thickness=3, save_img=True):
+def draw_bbox(bbox, preds_probs, img, name='test', fontScale=0.35, thickness=3, save_img=True, output_folder='output/'):
     img_copy = np.copy(img)
 
     n_digit = np.argmax(preds_probs[0])
@@ -90,8 +90,8 @@ def draw_bbox(bbox, preds_probs, img, name='test', fontScale=0.35, thickness=3, 
     loc = (detected_bbox['left'] , detected_bbox['bottom'] + 5)
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(img_c, text1, loc, font, fontScale=fontScale, color=(0, 255, 0), lineType=3, thickness=thickness)
-    if save_img == True:
-        cv2.imwrite('output/' + name + '.png', img_copy)
+    if save_img:
+        cv2.imwrite(output_folder + name + '.png', img_c)
     return img_c
 
 
@@ -99,27 +99,27 @@ def create_video(input_video, output_video, detection_model, classification_mode
     num = 1
     fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')
     cap = cv2.VideoCapture(input_video)
-    outCap = cv2.VideoWriter(output_video, fourcc, 10, (540, 960), True)
+    out_video = cv2.VideoWriter(output_video, fourcc, 10, (540, 960), True)
     fps = 40
     w = 1020
     h = 1920
     video_out = mp4_video_writer(output_video, (w, h), fps)
     while cap.isOpened():
         ret, frame = cap.read()
-        if ret == True:
-            currImg = frame
+        if ret:
+            curr_img = frame
             print("Processing frame {}".format(num))
             num = num + 1
         else:
-            currImg = None
+            curr_img = None
             break
-        frame = np.rot90(np.rot90(np.rot90(currImg)))
-        currImg = np.copy(frame)
-        outIm = detect_and_draw(currImg, detection_model, classification_model, name='test',
-                                fontScale=2, thickness=3, save_img=False)
-        if outIm is not None:
-            video_out.write(outIm)
+        frame = np.rot90(np.rot90(np.rot90(curr_img)))
+        curr_img = np.copy(frame)
+        detected_img = detect_and_draw(curr_img, detection_model, classification_model, name='test',
+                                       fontScale=2, thickness=3, save_img=False)
+        if detected_img is not None:
+            video_out.write(detected_img)
 
     cap.release()
-    outCap.release()
+    out_video.release()
     cv2.destroyAllWindows()
